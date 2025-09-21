@@ -1,7 +1,6 @@
 PROJETO DE SISTEMAS BASEADOS EM APRENDIZADO DE MÁQUINA
 
 Projeto 01 - Problema de Regressão
-
--Analise dataset AirBnb/RJ;
-- Comparação LazyPredict;
-- Gradio. 
+-Analise do dataset AirBnb/RJ;
+-Comparação LazyPredict;
+-Gradio. 
