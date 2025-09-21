@@ -1,0 +1,5 @@
+Crie dois virtualenvs para rodar:
+1) python3 -m venv .venvpycaret
+2) python3 -m venv .venv
+
+O primeiro servirá para rodar exclusivamente o pycaret, ja o segundo pra rodar o cenario normal e o lazypredict.
