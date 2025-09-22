@@ -4,3 +4,17 @@ Projeto 01 - Problema de Regressão
 -Analise do dataset AirBnb/RJ;
 -Comparação LazyPredict;
 -Gradio. 
+
+
+Treinar / gerar artefatos no notebook
+- Abra `airbnb_predictor.ipynb` no Jupyter (ou Colab).
+- Treine o modelo usando as células presentes. Após o treino, rode a célula "Save model checkpoint and scalers" — ela grava `model.ckpt` (ou `model_state_dict.pt`) e `scalers.pt` e também `feature_cols.json` com a ordem das features.
+
+
+Rodar o Gradio app standalone
+
+```bash
+# com o venv ativado
+python gradio/gradio_app.py
+# Acesse http://localhost:7860
+```

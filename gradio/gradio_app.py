@@ -25,45 +25,46 @@ try:
 except Exception:
     raise SystemExit("É necessário instalar o Gradio para rodar este app. Instale com: pip install gradio")
 
-ROOT = os.path.dirname(__file__)
+# Use repository root (one level up from this gradio/ folder) so we read the same `outputs/` as the notebooks
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+OUT = os.path.join(ROOT, 'outputs')
 
-def load_scalers(path=os.path.join(ROOT, 'scalers.pt')):
+def load_scalers(path=os.path.join(OUT, 'scalers.pt')):
     if not os.path.exists(path):
         print('Arquivo scalers.pt não encontrado em', path)
         return None
-    # torch 2.6+ may restrict unpickling by default. Try normal load first and
-    # if it fails, retry with a safe_globals context to allow numpy reconstruction.
-    try:
-        scalers = torch.load(path, map_location='cpu')
-    except Exception as e:
-        print('torch.load falhou ao carregar scalers.pt com erro:', e)
+    # Robust loader: try normal load, then weights_only=False, then add safe globals for numpy
+    def safe_torch_load(p):
+        p = str(p)
         try:
-            # Try to allowlist numpy reconstruction functions (trusted file required)
-            import numpy as _np
+            return torch.load(p, map_location='cpu')
+        except Exception as e1:
             try:
-                # safe_globals context manager is available in torch.serialization
-                with torch.serialization.safe_globals([_np.core.multiarray._reconstruct]):
-                    scalers = torch.load(path, map_location='cpu', weights_only=False)
-            except Exception:
-                # Older/newer torch versions may expose add_safe_globals instead
+                return torch.load(p, map_location='cpu', weights_only=False)
+            except Exception as e2:
                 try:
-                    torch.serialization.add_safe_globals([_np.core.multiarray._reconstruct])
-                    scalers = torch.load(path, map_location='cpu', weights_only=False)
-                finally:
-                    # best-effort: proceed even if removal isn't available
-                    pass
-        except Exception as e2:
-            print('Tentativa alternativa para carregar scalers falhou:', e2)
-            return None
-    # convert tensors to numpy if needed
-    for k, v in list(scalers.items()):
-        if isinstance(v, torch.Tensor):
-            scalers[k] = v.detach().cpu().numpy()
+                    # allowlist numpy multiarray reconstruct (trusted file required)
+                    torch.serialization.add_safe_globals(["numpy.core.multiarray._reconstruct"])
+                    return torch.load(p, map_location='cpu')
+                except Exception as e3:
+                    raise RuntimeError(f'Failed to load {p}: {e1} | {e2} | {e3}')
+
+    try:
+        scalers = safe_torch_load(path)
+    except Exception as e:
+        print('Falha ao carregar scalers.pt:', e)
+        return None
+
+    # convert tensors to numpy if needed and ensure a dict-like return
+    if isinstance(scalers, dict):
+        for k, v in list(scalers.items()):
+            if isinstance(v, torch.Tensor):
+                scalers[k] = v.detach().cpu().numpy()
     return scalers
 
 def infer_feature_cols():
     # Prefer explicit JSON
-    fn_json = os.path.join(ROOT, 'feature_cols.json')
+    fn_json = os.path.join(OUT, 'feature_cols.json')
     if os.path.exists(fn_json):
         try:
             with open(fn_json, 'r', encoding='utf-8') as f:
@@ -72,7 +73,7 @@ def infer_feature_cols():
             pass
 
     # Fall back to listings.csv (best-effort)
-    fn_csv = os.path.join(ROOT, 'listings.csv')
+    fn_csv = os.path.join(OUT, 'listings.csv')
     if os.path.exists(fn_csv):
         try:
             df = pd.read_csv(fn_csv)
@@ -90,7 +91,7 @@ def build_model(input_dim):
     # O notebook usou um modelo linear simples: Sequential(Linear(D,1)).
     return nn.Sequential(nn.Linear(input_dim, 1))
 
-def load_model(root=ROOT):
+def load_model(root=OUT):
     # Try model.ckpt (Architecture.save_checkpoint), then model_state_dict.pt
     ckpt_path = os.path.join(root, 'model.ckpt')
     state_path = os.path.join(root, 'model_state_dict.pt')
@@ -123,6 +124,16 @@ def load_model(root=ROOT):
         print('Aviso: nenhum peso do modelo foi carregado. Usando modelo com pesos aleatórios.')
 
     model.eval()
+
+    # Validate that model input dimension matches feature_cols length
+    try:
+        first_layer = next((m for m in model.modules() if isinstance(m, nn.Linear)), None)
+        if first_layer is not None and hasattr(first_layer, 'in_features'):
+            if first_layer.in_features != D:
+                print(f'Aviso: dimensão do modelo ({first_layer.in_features}) != número de features ({D}). Inputs podem estar desalinhados.')
+    except Exception:
+        pass
+
     return model, scalers, feature_cols
 
 def predict_fn(model, scalers, feature_cols, *vals):
